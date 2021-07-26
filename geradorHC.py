@@ -8,9 +8,10 @@ from PIL import Image, ImageOps
 import json
 
 from numpy.lib.shape_base import split
+from matplotlib.patches import Rectangle
 
 
-class HCMaskGenerator():
+class HCMask():
     group_by_defs = {
         'mean': lambda x, y: (x + y)/2,
         'max': lambda x, y: x if x > y else y
@@ -18,77 +19,13 @@ class HCMaskGenerator():
 
     filters_oriented = {}
 
-    def __init__(self, input_size=(0, 0, 3), filters={}, filters_sizes=()):
+    def __init__(self, input_size=(0, 0, 3), filters={}):
         self.filters = filters
-        self.filter_sizes = filters_sizes
         self.mask_length = int(input_size[0])
         self.input_size = input_size
-        if (filters_sizes):
-            self.get_number_of_curves_by_level()
 
         if (filters):
             self.get_filters_oriented()
-
-    def get_number_of_curves_by_level(self):
-        length_of_filters = len(self.filter_sizes)
-        self.amount_per_filter = []
-        for i in range(length_of_filters):
-            amount = self.filter_sizes[i]
-            filter_size = 2**(length_of_filters - (i+1))
-            self.amount_per_filter.append((filter_size, amount))
-        print('Filters (filter_size, amount):', self.amount_per_filter)
-
-    def get_final_hc_length(self):
-        def size_per_filter(filter_data):
-            filter_size = filter_data[0]
-            filter_amount = filter_data[1]
-            return filter_size * filter_amount
-
-        final_hc_length = sum(list(
-            map(size_per_filter, self.amount_per_filter)))
-
-        return final_hc_length
-
-    def generate_mask(self):
-        mask = np.zeros(shape=(self.mask_length, self.mask_length))
-
-        for (filter_size, amount) in self.amount_per_filter:
-
-            if (amount == 0):  # if there is no filter with filter_size, continue to next one
-                continue
-
-            # the numbe of slices represents how many filters of filter_size can fit in the mask
-            number_of_slices = int(self.mask_length/filter_size)
-            mask_slices = []
-
-            for x in range(number_of_slices):
-                for y in range(number_of_slices):
-                    mask_slices.append(
-                        (x*filter_size, y*filter_size))
-
-            def get_empty_spot_in_mask():
-                slice = None
-                while True:
-                    if (len(mask_slices) == 0):
-                        break
-
-                    slice = random.choice(mask_slices)
-                    mask_slices.remove(slice)
-
-                    # check if mask in the slice coords is empty
-                    if mask[slice[0]][slice[1]] == 0.:
-                        break
-
-                return slice
-
-            for _ in range(amount):
-                (lin, col) = get_empty_spot_in_mask()
-
-                for x in range(filter_size):
-                    for y in range(filter_size):
-                        # filter_level = self.mask_size / filter_size
-                        mask[lin + x][col + y] = filter_size
-        return mask
 
     def xy2d(self, n, x, y):
         d = 0
@@ -221,7 +158,7 @@ class HCMaskGenerator():
         self.build_multi_level_hc()
 
     def build_multi_level_hc(self):
-        hc = self.get_full_hc()
+        # hc = self.get_full_hc()
         self.multi_level_hc_centers = []
         self.multi_level_hc_corners = []
         for hc_origin in iter(self.filters_oriented):
@@ -232,24 +169,67 @@ class HCMaskGenerator():
         # print(self.multi_level_hc)
 
     def apply_mask(self, input_image, group_by="mean"):
-        hc = self.get_full_hc()
+        final_hc = []
         self.multi_level_hc_centers = []
-        for hc_origin in iter(self.filters_oriented):
-            self.multi_level_hc_centers.append(hc[hc_origin])
 
-    def plot_mask(self, input_image, save=False):
+        converted_image = np.array(input_image)
+
+        for index in iter(self.filters_oriented):
+            corner = self.filters_oriented[index]['corners']
+            origin_x, origin_y = corner[0]
+            diagonal_x, diagonal_y = corner[2]
+            section = converted_image[origin_x: origin_x + diagonal_x, origin_y: origin_y + diagonal_y]
+            mean_y = np.mean(section, 1);
+            # print(mean_y.shape)
+            mean = np.mean(mean_y, 0);
+            # print(origin_x, origin_y, diagonal_x, diagonal_y, section)
+            final_hc.append(mean)
+        
+        return np.array(final_hc)
+
+    def plot_mask(self, input_image, mask_image=None, save=False):
         # mask = self.mask
         # final_hc = self.apply_mask(input_image, mask)
         # print(final_hc)
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(8, 8))
 
-        plt.imshow(input_image)
+        fontsize = 12
 
+        # Original Image
+        ax1.set_title('Original', fontsize=fontsize)
+        ax1.imshow(input_image, cmap='gist_stern_r')
+        ax1.invert_yaxis()
+
+        if mask_image:
+            ax2.set_title('Mask representation', fontsize=fontsize)
+            ax2.imshow(mask_image, cmap='gist_stern_r')
+            ax2.invert_yaxis()
+
+        # ax1.axis('off')
         hc_corners = self.multi_level_hc_corners
-        hc_centers = self.multi_level_hc_centers
-        plt.plot(*zip(*hc_corners), linewidth=1.5)
-        plt.plot(*zip(*hc_centers), linewidth=1.5)
+        ax3.set_title(f'QuadTree equivalent', fontsize=fontsize)
+        ax3.imshow(input_image, cmap='gist_stern_r')
+        for filter_key in iter(self.filters):
+            x, y = filter_key.split(':')
+            size = self.filters[filter_key]
+            ax3.add_patch(Rectangle((int(x), int(y)), size, size,
+                                    linewidth=.7, edgecolor='r', facecolor="none"))
 
-        plt.gca().invert_yaxis()
+        # ax3.plot(*zip(*hc_corners), linewidth=.5)
+        ax3.invert_yaxis()
+
+        hc_centers = self.multi_level_hc_centers
+        ax4.set_title(f'HilbertCurve', fontsize=fontsize)
+        ax4.imshow(input_image, cmap='gist_stern_r')
+        for filter_key in iter(self.filters):
+            x, y = filter_key.split(':')
+            size = self.filters[filter_key]
+            ax4.add_patch(Rectangle((int(x), int(y)), size, size,
+                                    linewidth=.2, edgecolor='b', facecolor="none", alpha=.5))
+        ax4.plot(*zip(*hc_centers), linewidth=.7, color="r")
+        ax4.invert_yaxis()
+        # ax2.axis('off')
+        fig.tight_layout()
 
         # normalizer = np.max(mask)
         # lin, col = mask.shape
@@ -260,23 +240,23 @@ class HCMaskGenerator():
         # plt.imshow(img, alpha=0.5)
 
         plt.show()
-        # https://www.ti-enxame.com/pt/python/calculo-da-entropia-do-glcm-de-uma-imagem/829236908/
-        # https://scikit-image.org/docs/dev/auto_examples/filters/plot_entropy.html
-
-# def generateInputImage(size=256):
-#     return np.random.randint(255, size=(size, size, 3), dtype=np.uint8)
 
 
-file = Image.open('op.jpeg')
+file = Image.open('olho.jpeg')
 image = file.load()
 data = np.asarray(file)
+mask_file_name = 'entropy_mask'
+# mask_image = Image.open(f'masks/{mask_file_name}.png')
 
-with open('masks/filters-9.json') as json_file:
+with open(f'masks/{mask_file_name}.json') as json_file:
     filters = json.load(json_file)
-    hc_mask = HCMaskGenerator(input_size=data.shape, filters=filters)
+    hc_mask = HCMask(input_size=data.shape, filters=filters)
     # hc_mask.apply_mask(input_image=image)
     file = ImageOps.flip(file)
-    hc_mask.plot_mask(input_image=file)
+    # hc_mask.plot_mask(input_image=file, mask_image=mask_image)
+    # hc_mask.plot_mask(input_image=file)
+    applied_mask = hc_mask.apply_mask(input_image=file)
+    print(applied_mask.shape)
 
 # hc_mask = HCMaskGenerator(input_size=data.shape, filters_sizes=(0, 15))
 # hc_mask = HCMaskGenerator(input_size=data.shape, filters_sizes=(0, 3, 10, 30, 100, 1000, 0)) #128
