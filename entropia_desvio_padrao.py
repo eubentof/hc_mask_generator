@@ -9,8 +9,6 @@ from skimage.color import rgb2hsv, rgb2gray, rgb2yuv
 
 import json
 
-from geradorHC import HCMask
-
 img_name = 'olho.jpeg'
 olho = imread(img_name)
 # plt.figure(num=None, figsize=(8, 6), dpi=80)
@@ -52,17 +50,17 @@ def apply_threshold(image, threshold=None):
     return scaled_entropy > threshold if threshold else scaled_entropy
 
 
-def build_mask_from_threshold(input_image, threshold):
+def build_mask_from_threshold_std(input_image, threshold):
 
-    input_image_th = apply_threshold(input_image, threshold)
-    size = len(input_image_th)
-    curr_filter_size = len(input_image_th)/2
+    # input_image_th = apply_threshold(input_image, threshold)
+    size = len(input_image)
+    curr_filter_size = len(input_image)/2
 
-    quadrants_to_be_analysed = [((0, 0), input_image_th)]
+    quadrants_to_be_analysed = [((0, 0), input_image)]
 
     mask = {}
 
-    def get_four_quadrants(origin, quad):
+    def divide_quad_in_four(origin, quad):
         # The origin will always be the bottom left corner of the segment
         coordX, coordY = origin
         quad = np.array(quad)
@@ -73,30 +71,33 @@ def build_mask_from_threshold(input_image, threshold):
         top_left = quad[:, :half][half:]
         top_right = quad[:, half:][half:]
         btm_right = quad[:, half:][:half]
-        return [
+        # print(btm_left.shape, top_left.shape, top_right.shape, btm_right.shape)
+        # print((coordX, coordY), (coordX, coordY + half), (coordX + half, coordY + half), (coordX + half, coordY))
+        subquads = [
             ((coordX, coordY), btm_left),
             ((coordX, coordY + half), top_left),
             ((coordX + half, coordY + half), top_right),
             ((coordX + half, coordY), btm_right)
         ]
+        return subquads
 
     try:
 
         while curr_filter_size > 1:
-            # print('\n')
+            # print('=============')
             # print('Current filter size:', curr_filter_size)
 
             sub_quads = []
             # For each quad to be analyzed, divide it into 4 quadrants
             for coords, quad in quadrants_to_be_analysed:
-                sub_quads += get_four_quadrants(coords, quad)
+                sub_quads += divide_quad_in_four(coords, quad)
 
             quadrants_to_be_analysed = []
-
+            # break
             # print(sub_quads)
             for origin, quad in sub_quads:
-                should_divide = np.isin(True, quad)
-                # print(should_divide)
+                should_divide = np.std(quad) > threshold and curr_filter_size > 2
+                # print(np.std(quad), should_divide)
                 if should_divide:
                     # print(f'Dividing at {origin}, with size {curr_filter_size}, into 4 quads.')
                     # print('D: ', origin, curr_filter_size)
@@ -117,8 +118,8 @@ def build_mask_from_threshold(input_image, threshold):
     return mask
 
 
-threshold = 0.6
-# image_entropy = apply_threshold(olho)
+threshold = 9
+image_entropy = apply_threshold(olho)
 # image_entropy_above_threshold = apply_threshold(olho, threshold)
 # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(5, 5))
 
@@ -130,16 +131,16 @@ threshold = 0.6
 # ax2.axis('off')
 # fig.tight_layout()
 # print( x[1].__contains__(True))
-mask = build_mask_from_threshold(olho, threshold)
+mask = build_mask_from_threshold_std(olho, threshold)
 # mask = build_mask_from_threshold(image_entropy_above_threshold)
 
-print(mask)
+# print(mask)
 
-file_name = 'entropy'
-# with open(f'masks/entropy/{file_name}_{threshold}_th_mask.json', 'w') as f:
-#     json.dump(mask, f)
+file_name = 'entropy_std'
+with open(f'masks/{file_name}_mask.json', 'w') as f:
+    json.dump(mask, f)
 
-# plt.imsave(f'masks/entropy/{file_name}_{threshold}_image.jpg', image_entropy)
+plt.imsave(f'masks/{file_name}_image.jpg', image_entropy)
 # plt.imsave(f'masks/entropy/{file_name}_{threshold}_th_image.jpg', image_entropy_above_threshold)
 
 # plt.show()

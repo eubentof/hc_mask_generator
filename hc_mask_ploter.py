@@ -1,17 +1,8 @@
 import numpy as np
-import math
-import random
-# from PIL import Image as im
 import matplotlib.pyplot as plt
-from numpy.core.fromnumeric import shape
-from PIL import Image, ImageOps
-import json
-
-from numpy.lib.shape_base import split
 from matplotlib.patches import Rectangle
 
-
-class HCMask():
+class HCMaskPloter():
     group_by_defs = {
         'mean': lambda x, y: (x + y)/2,
         'max': lambda x, y: x if x > y else y
@@ -20,12 +11,11 @@ class HCMask():
     filters_oriented = {}
 
     def __init__(self, input_size=(0, 0, 3), filters={}):
-        self.filters = filters
+        self.filters = filters.copy()
         self.mask_length = int(input_size[0])
         self.input_size = input_size
 
-        if (filters):
-            self.get_filters_oriented()
+        self.get_filters_oriented()
 
     def xy2d(self, n, x, y):
         d = 0
@@ -61,31 +51,6 @@ class HCMask():
 
         return n, x, y, rx, ry
 
-    def get_full_hc(self):
-        '''
-            Returns a full hilbert curve with the size of the input image in an array of coordinates.
-        '''
-        size = self.mask_length
-        hc = np.zeros((size**2, 2))
-        n = size
-        for x in range(size):
-            for y in range(size):
-                d = self.xy2d(n, x, y)
-                hc[d] = (x, y)
-        return hc
-
-    def image_to_hc(self, input_image):
-        '''
-            Converts the image to the hilbert curve
-        '''
-        size = self.mask_length
-        hc = np.zeros((size**2, 3))
-        for x in range(size):
-            for y in range(size):
-                p = self.xy2d(size, x, y)
-                hc[p] = input_image[x, y]
-        return hc
-
     def get_filters_oriented(self):
         '''
             Each filter object has the { 'coordX:coordY': filter_size} format.
@@ -105,7 +70,8 @@ class HCMask():
                 }
             }
         '''
-
+        self.filters_oriented = {}
+        
         # Maps for each key in filters dictionary.
         for filter_key in iter(self.filters):
             # Splits the key. Ex: '0:0' -> ['0', '0']
@@ -158,7 +124,6 @@ class HCMask():
         self.build_multi_level_hc()
 
     def build_multi_level_hc(self):
-        # hc = self.get_full_hc()
         self.multi_level_hc_centers = []
         self.multi_level_hc_corners = []
         for hc_origin in iter(self.filters_oriented):
@@ -168,46 +133,25 @@ class HCMask():
             self.multi_level_hc_corners += corners
         # print(self.multi_level_hc)
 
-    def apply_mask(self, input_image, group_by="mean"):
-        final_hc = []
-        self.multi_level_hc_centers = []
-
-        converted_image = np.array(input_image)
-
-        for index in iter(self.filters_oriented):
-            corner = self.filters_oriented[index]['corners']
-            origin_x, origin_y = corner[0]
-            diagonal_x, diagonal_y = corner[2]
-            section = converted_image[origin_x: origin_x + diagonal_x, origin_y: origin_y + diagonal_y]
-            mean_y = np.mean(section, 1);
-            # print(mean_y.shape)
-            mean = np.mean(mean_y, 0);
-            # print(origin_x, origin_y, diagonal_x, diagonal_y, section)
-            final_hc.append(mean)
-        
-        return np.array(final_hc)
-
-    def plot_mask(self, input_image, mask_image=None, save=False):
-        # mask = self.mask
-        # final_hc = self.apply_mask(input_image, mask)
-        # print(final_hc)
+    def plot_mask(self, input_image, mask_image=None, titles={}, save=False, filename='image.png'):
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(8, 8))
 
+        fig.suptitle(titles['plot'], fontsize = 16)
+        
         fontsize = 12
 
         # Original Image
-        ax1.set_title('Original', fontsize=fontsize)
-        ax1.imshow(input_image, cmap='gist_stern_r')
+        ax1.set_title(titles['ax1'], fontsize=fontsize)
+        ax1.imshow(input_image, cmap='gray')
         ax1.invert_yaxis()
 
-        if mask_image:
-            ax2.set_title('Mask representation', fontsize=fontsize)
-            ax2.imshow(mask_image, cmap='gist_stern_r')
+        if mask_image is not None:
+            ax2.set_title(titles['ax2'], fontsize=fontsize)
+            ax2.imshow(mask_image, cmap='gray')
             # ax2.invert_yaxis()
 
         # ax1.axis('off')
-        hc_corners = self.multi_level_hc_corners
-        ax3.set_title(f'QuadTree equivalent', fontsize=fontsize)
+        ax3.set_title(titles['ax3'], fontsize=fontsize)
         ax3.imshow(input_image, cmap='gist_stern_r')
         for filter_key in iter(self.filters):
             x, y = filter_key.split(':')
@@ -219,7 +163,7 @@ class HCMask():
         ax3.invert_yaxis()
 
         hc_centers = self.multi_level_hc_centers
-        ax4.set_title(f'HilbertCurve', fontsize=fontsize)
+        ax4.set_title(titles['ax4'], fontsize=fontsize)
         ax4.imshow(input_image, cmap='gist_stern_r')
         for filter_key in iter(self.filters):
             x, y = filter_key.split(':')
@@ -239,26 +183,13 @@ class HCMask():
         # img[:, :, 2] = mask/normalizer
         # plt.imshow(img, alpha=0.5)
 
-        plt.show()
-
-
-# file = Image.open('olho.jpeg')
-# image = file.load()
-# data = np.asarray(file)
-# mask_file_name = 'entropy_std'
-# mask_image = Image.open(f'masks/{mask_file_name}_image.jpg')
-
-# with open(f'masks/{mask_file_name}_mask.json') as json_file:
-#     filters = json.load(json_file)
-#     hc_mask = HCMask(input_size=data.shape, filters=filters)
-#     # hc_mask.apply_mask(input_image=image)
-#     file = ImageOps.flip(file)
-#     hc_mask.plot_mask(input_image=file, mask_image=mask_image)
-#     # hc_mask.plot_mask(input_image=file)
-#     # applied_mask = hc_mask.apply_mask(input_image=file)
-#     # print(applied_mask.shape)
-
-# # hc_mask = HCMaskGenerator(input_size=data.shape, filters_sizes=(0, 15))
-# # hc_mask = HCMaskGenerator(input_size=data.shape, filters_sizes=(0, 3, 10, 30, 100, 1000, 0)) #128
-
-# # hc_mask.plot_mask(image)
+        if not save:
+            plt.show()
+        if save:
+            plt.savefig(filename)
+        plt.clf()
+        ax1.cla()
+        ax2.cla()
+        ax3.cla()
+        ax4.cla()
+        plt.close()
